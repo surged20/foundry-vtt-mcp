@@ -27,6 +27,8 @@ export class FoundryConnector {
   private activeConnectionType: 'websocket' | 'webrtc' | null = null;
   private pendingQueries = new Map<string, PendingQuery>();
   private queryIdCounter = 0;
+  private queryQueue: Array<() => Promise<any>> = [];
+  private isProcessingQuery = false;
 
   constructor({ config, logger }: FoundryConnectorOptions) {
     this.config = config;
@@ -222,6 +224,13 @@ export class FoundryConnector {
           this.logger.error('Query failed', { id: message.id, error: message.data.error });
           pending.reject(new Error(message.data.error || 'Query failed'));
         }
+      } else {
+        // Log unmatched responses to help diagnose connection poisoning
+        this.logger.warn('Received response for unknown query (possibly timed out)', {
+          id: message.id,
+          success: message.data?.success,
+          pendingCount: this.pendingQueries.size
+        });
       }
       return;
     }
@@ -346,6 +355,46 @@ export class FoundryConnector {
   }
 
   async query(method: string, data?: any): Promise<any> {
+    // Queue the query to prevent overlapping slow queries
+    return new Promise((resolve, reject) => {
+      this.queryQueue.push(async () => {
+        try {
+          const result = await this.executeQuery(method, data);
+          resolve(result);
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      // Start processing queue if not already processing
+      this.processQueryQueue();
+    });
+  }
+
+  private async processQueryQueue(): Promise<void> {
+    // If already processing or queue is empty, return
+    if (this.isProcessingQuery || this.queryQueue.length === 0) {
+      return;
+    }
+
+    this.isProcessingQuery = true;
+
+    while (this.queryQueue.length > 0) {
+      const queryFn = this.queryQueue.shift();
+      if (queryFn) {
+        try {
+          await queryFn();
+        } catch (error) {
+          // Error already handled in query() promise
+          this.logger.debug('Query in queue failed', { error });
+        }
+      }
+    }
+
+    this.isProcessingQuery = false;
+  }
+
+  private async executeQuery(method: string, data?: any): Promise<any> {
     // Check connection based on active connection type
     const isConnected = this.activeConnectionType === 'webrtc'
       ? (this.webrtcPeer && this.webrtcPeer.getIsConnected())
@@ -362,7 +411,7 @@ export class FoundryConnector {
       const timeout = setTimeout(() => {
         this.pendingQueries.delete(queryId);
         reject(new Error(`Query timeout: ${method}`));
-      }, 10000); // 10 second timeout
+      }, 30000); // 30 second timeout (increased from 10s to handle complex queries)
 
       this.pendingQueries.set(queryId, { resolve, reject, timeout });
 

@@ -1107,9 +1107,9 @@ export class FoundryDataAccess {
     if (identifier.length === 16) { // Foundry ID length
       actor = game.actors.get(identifier);
     }
-    
+
     if (!actor) {
-      actor = game.actors.find(a => 
+      actor = game.actors.find(a =>
         a.name?.toLowerCase() === identifier.toLowerCase()
       );
     }
@@ -1118,21 +1118,29 @@ export class FoundryDataAccess {
       throw new Error(`${ERROR_MESSAGES.CHARACTER_NOT_FOUND}: ${identifier}`);
     }
 
-    // Build character data structure
-    const characterData: CharacterInfo = {
-      id: actor.id || '',
-      name: actor.name || '',
-      type: actor.type,
-      ...(actor.img ? { img: actor.img } : {}),
-      system: this.sanitizeData((actor as any).system),
-      items: actor.items.map(item => ({
+    // Process items with async iteration to prevent event loop blocking
+    const items: CharacterItem[] = [];
+    let itemCount = 0;
+    for (const item of actor.items) {
+      items.push({
         id: item.id,
         name: item.name,
         type: item.type,
         ...(item.img ? { img: item.img } : {}),
         system: this.sanitizeData(item.system),
-      })),
-      effects: actor.effects.map(effect => ({
+      });
+
+      // Yield to event loop every 10 items to allow other operations
+      if (++itemCount % 10 === 0) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    }
+
+    // Process effects with async iteration to prevent event loop blocking
+    const effects: CharacterEffect[] = [];
+    let effectCount = 0;
+    for (const effect of actor.effects) {
+      effects.push({
         id: effect.id,
         name: (effect as any).name || (effect as any).label || 'Unknown Effect',
         ...((effect as any).icon ? { icon: (effect as any).icon } : {}),
@@ -1144,7 +1152,23 @@ export class FoundryDataAccess {
             remaining: (effect as any).duration.remaining,
           }
         } : {}),
-      })),
+      });
+
+      // Yield to event loop every 10 effects
+      if (++effectCount % 10 === 0) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    }
+
+    // Build character data structure
+    const characterData: CharacterInfo = {
+      id: actor.id || '',
+      name: actor.name || '',
+      type: actor.type,
+      ...(actor.img ? { img: actor.img } : {}),
+      system: this.sanitizeData((actor as any).system),
+      items,
+      effects,
     };
 
     return characterData;
@@ -2101,9 +2125,8 @@ export class FoundryDataAccess {
       return obj;
     }
 
-    // Safety depth limit to prevent extremely deep recursion
-    if (depth > 50) {
-      console.warn(`[${this.moduleId}] Sanitization depth limit reached at depth ${depth}`);
+    // Reduced depth limit for performance (was 50, now 10)
+    if (depth > 10) {
       return '[Max depth reached]';
     }
 
@@ -2116,15 +2139,29 @@ export class FoundryDataAccess {
     visited.add(obj);
 
     try {
-      // Handle arrays
+      // Handle arrays with size limiting for performance
       if (Array.isArray(obj)) {
-        return obj.map(item => this.removeSensitiveFields(item, visited, depth + 1));
+        // Limit large arrays to first 100 items to prevent excessive processing
+        const itemsToProcess = obj.slice(0, 100);
+        const result = itemsToProcess.map(item => this.removeSensitiveFields(item, visited, depth + 1));
+        if (obj.length > 100) {
+          result.push(`[${obj.length - 100} more items truncated]`);
+        }
+        return result;
       }
 
       // Create a new sanitized object
       const sanitized: any = {};
-      
+      let keyCount = 0;
+      const MAX_KEYS = 100; // Limit object keys for performance
+
       for (const [key, value] of Object.entries(obj)) {
+        // Limit number of keys processed
+        if (++keyCount > MAX_KEYS) {
+          sanitized['_truncated'] = `[${Object.keys(obj).length - MAX_KEYS} more keys truncated]`;
+          break;
+        }
+
         // Skip sensitive and problematic fields entirely
         if (this.isSensitiveOrProblematicField(key)) {
           continue;
