@@ -2125,8 +2125,9 @@ export class FoundryDataAccess {
       return obj;
     }
 
-    // Reduced depth limit for performance (was 50, now 10)
-    if (depth > 10) {
+    // Safety depth limit to prevent extremely deep recursion
+    if (depth > 50) {
+      console.warn(`[${this.moduleId}] Sanitization depth limit reached at depth ${depth}`);
       return '[Max depth reached]';
     }
 
@@ -2139,29 +2140,15 @@ export class FoundryDataAccess {
     visited.add(obj);
 
     try {
-      // Handle arrays with size limiting for performance
+      // Handle arrays
       if (Array.isArray(obj)) {
-        // Limit large arrays to first 100 items to prevent excessive processing
-        const itemsToProcess = obj.slice(0, 100);
-        const result = itemsToProcess.map(item => this.removeSensitiveFields(item, visited, depth + 1));
-        if (obj.length > 100) {
-          result.push(`[${obj.length - 100} more items truncated]`);
-        }
-        return result;
+        return obj.map(item => this.removeSensitiveFields(item, visited, depth + 1));
       }
 
       // Create a new sanitized object
       const sanitized: any = {};
-      let keyCount = 0;
-      const MAX_KEYS = 100; // Limit object keys for performance
 
       for (const [key, value] of Object.entries(obj)) {
-        // Limit number of keys processed
-        if (++keyCount > MAX_KEYS) {
-          sanitized['_truncated'] = `[${Object.keys(obj).length - MAX_KEYS} more keys truncated]`;
-          break;
-        }
-
         // Skip sensitive and problematic fields entirely
         if (this.isSensitiveOrProblematicField(key)) {
           continue;
