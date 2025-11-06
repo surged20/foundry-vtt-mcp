@@ -11,6 +11,17 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.12.2'
+
+      - name: Install workspace dependencies (CI)
+        run: npm ci --workspaces --include-workspace-root
+
+      - name: Build Foundry Module
+        run: npm run build --workspace=packages/foundry-module
+
       - name: Create module zip
         run: |
           cd packages/foundry-module
@@ -20,5 +31,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          files: foundry-vtt-mcp.zip
+          files: packages/foundry-module/module.json, foundry-vtt-mcp.zip
           generate_release_notes: true
