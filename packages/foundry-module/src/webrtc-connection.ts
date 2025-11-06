@@ -74,7 +74,7 @@ export class WebRTCConnection {
       this.connectionState = CONNECTION_STATES.CONNECTED;
 
       // Log SCTP configuration to understand message size limits
-      if (this.peerConnection.sctp) {
+      if (this.peerConnection?.sctp) {
         console.log('[MCP-DEBUG] SCTP Configuration:', {
           maxMessageSize: this.peerConnection.sctp.maxMessageSize,
           state: this.peerConnection.sctp.state,
@@ -84,15 +84,17 @@ export class WebRTCConnection {
         console.warn('[MCP-DEBUG] SCTP transport not available on peer connection');
       }
 
-      console.log('[MCP-DEBUG] Data channel configuration:', {
-        label: this.dataChannel.label,
-        ordered: this.dataChannel.ordered,
-        maxPacketLifeTime: this.dataChannel.maxPacketLifeTime,
-        maxRetransmits: this.dataChannel.maxRetransmits,
-        protocol: this.dataChannel.protocol,
-        negotiated: this.dataChannel.negotiated,
-        id: this.dataChannel.id
-      });
+      if (this.dataChannel) {
+        console.log('[MCP-DEBUG] Data channel configuration:', {
+          label: this.dataChannel.label,
+          ordered: this.dataChannel.ordered,
+          maxPacketLifeTime: this.dataChannel.maxPacketLifeTime,
+          maxRetransmits: this.dataChannel.maxRetransmits,
+          protocol: this.dataChannel.protocol,
+          negotiated: this.dataChannel.negotiated,
+          id: this.dataChannel.id
+        });
+      }
     };
 
     this.dataChannel.onclose = (event) => {
