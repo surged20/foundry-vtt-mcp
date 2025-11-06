@@ -72,6 +72,27 @@ export class WebRTCConnection {
     this.dataChannel.onopen = () => {
       this.log('WebRTC data channel opened');
       this.connectionState = CONNECTION_STATES.CONNECTED;
+
+      // Log SCTP configuration to understand message size limits
+      if (this.peerConnection.sctp) {
+        console.log('[MCP-DEBUG] SCTP Configuration:', {
+          maxMessageSize: this.peerConnection.sctp.maxMessageSize,
+          state: this.peerConnection.sctp.state,
+          maxChannels: this.peerConnection.sctp.maxChannels
+        });
+      } else {
+        console.warn('[MCP-DEBUG] SCTP transport not available on peer connection');
+      }
+
+      console.log('[MCP-DEBUG] Data channel configuration:', {
+        label: this.dataChannel.label,
+        ordered: this.dataChannel.ordered,
+        maxPacketLifeTime: this.dataChannel.maxPacketLifeTime,
+        maxRetransmits: this.dataChannel.maxRetransmits,
+        protocol: this.dataChannel.protocol,
+        negotiated: this.dataChannel.negotiated,
+        id: this.dataChannel.id
+      });
     };
 
     this.dataChannel.onclose = (event) => {
@@ -217,18 +238,58 @@ export class WebRTCConnection {
     try {
       const json = JSON.stringify(message);
       const size = json.length;
-      console.log(`[MCP-DEBUG] Sending ${size} bytes via WebRTC data channel`);
-      console.log(`[MCP-DEBUG] Data channel bufferedAmount before send: ${this.dataChannel.bufferedAmount}`);
 
-      this.dataChannel.send(json);
+      // WebRTC SCTP limit is ~240KB with overhead, use 200KB as safe threshold
+      const MAX_CHUNK_SIZE = 200 * 1024; // 200KB
 
-      console.log(`[MCP-DEBUG] Data channel bufferedAmount after send: ${this.dataChannel.bufferedAmount}`);
-      console.log(`[MCP-DEBUG] WebRTC send succeeded for: ${message.type}`);
-      this.log(`Sent WebRTC message: ${message.type}`);
+      if (size > MAX_CHUNK_SIZE) {
+        console.log(`[MCP-DEBUG] Message size ${size} bytes exceeds ${MAX_CHUNK_SIZE}, chunking...`);
+        this.sendChunkedMessage(message, json);
+      } else {
+        console.log(`[MCP-DEBUG] Sending ${size} bytes via WebRTC data channel`);
+        console.log(`[MCP-DEBUG] Data channel bufferedAmount before send: ${this.dataChannel.bufferedAmount}`);
+
+        this.dataChannel.send(json);
+
+        console.log(`[MCP-DEBUG] Data channel bufferedAmount after send: ${this.dataChannel.bufferedAmount}`);
+        console.log(`[MCP-DEBUG] WebRTC send succeeded for: ${message.type}`);
+        this.log(`Sent WebRTC message: ${message.type}`);
+      }
     } catch (error) {
       console.error(`[MCP-DEBUG] WebRTC send FAILED:`, error);
       this.log(`Failed to send WebRTC message: ${error}`);
     }
+  }
+
+  private sendChunkedMessage(originalMessage: any, json: string): void {
+    const CHUNK_SIZE = 100 * 1024; // 100KB chunks (safe size well under limit)
+    const totalChunks = Math.ceil(json.length / CHUNK_SIZE);
+    const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+    console.log(`[MCP-DEBUG] Splitting into ${totalChunks} chunks of ~${CHUNK_SIZE} bytes`);
+
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end = Math.min(start + CHUNK_SIZE, json.length);
+      const chunk = json.substring(start, end);
+
+      const chunkMessage = {
+        type: 'chunked-message',
+        chunkId: chunkId,
+        chunkIndex: i,
+        totalChunks: totalChunks,
+        chunk: chunk,
+        originalType: originalMessage.type,
+        originalId: originalMessage.id
+      };
+
+      const chunkJson = JSON.stringify(chunkMessage);
+      console.log(`[MCP-DEBUG] Sending chunk ${i + 1}/${totalChunks} (${chunkJson.length} bytes)`);
+
+      this.dataChannel!.send(chunkJson);
+    }
+
+    console.log(`[MCP-DEBUG] All ${totalChunks} chunks sent for ${originalMessage.type}`);
   }
 
   isConnected(): boolean {
