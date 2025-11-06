@@ -241,8 +241,8 @@ export class WebRTCConnection {
       const json = JSON.stringify(message);
       const size = json.length;
 
-      // WebRTC SCTP limit is ~240KB with overhead, use 200KB as safe threshold
-      const MAX_CHUNK_SIZE = 200 * 1024; // 200KB
+      // SCTP maxMessageSize is 64KB (65536 bytes), use 50KB as safe threshold for chunking
+      const MAX_CHUNK_SIZE = 50 * 1024; // 50KB (well under 64KB limit)
 
       if (size > MAX_CHUNK_SIZE) {
         console.log(`[MCP-DEBUG] Message size ${size} bytes exceeds ${MAX_CHUNK_SIZE}, chunking...`);
@@ -264,11 +264,11 @@ export class WebRTCConnection {
   }
 
   private sendChunkedMessage(originalMessage: any, json: string): void {
-    const CHUNK_SIZE = 100 * 1024; // 100KB chunks (safe size well under limit)
+    const CHUNK_SIZE = 40 * 1024; // 40KB chunks (safe under 64KB SCTP limit with overhead)
     const totalChunks = Math.ceil(json.length / CHUNK_SIZE);
     const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    console.log(`[MCP-DEBUG] Splitting into ${totalChunks} chunks of ~${CHUNK_SIZE} bytes`);
+    console.log(`[MCP-DEBUG] Splitting ${json.length} bytes into ${totalChunks} chunks of ~${CHUNK_SIZE} bytes`);
 
     for (let i = 0; i < totalChunks; i++) {
       const start = i * CHUNK_SIZE;

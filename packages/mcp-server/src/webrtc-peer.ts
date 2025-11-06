@@ -19,6 +19,7 @@ export class WebRTCPeer {
   private config: Config['foundry']['webrtc'];
   private onMessageHandler: (message: any) => Promise<void>;
   private isConnected = false;
+  private pendingChunks: Map<string, { chunks: Map<number, string>, totalChunks: number, originalType: string, originalId: string }> = new Map();
 
   constructor({ config, logger, onMessage }: WebRTCPeerOptions) {
     this.config = config;
@@ -137,6 +138,13 @@ export class WebRTCPeer {
           dataPreview: event.data?.substring(0, 100)
         });
         const message = JSON.parse(event.data);
+
+        // Handle chunked messages
+        if (message.type === 'chunked-message') {
+          await this.handleChunkedMessage(message);
+          return;
+        }
+
         console.error('[WebRTC DEBUG] Parsed message successfully', {
           type: message.type,
           requestId: message.requestId,
@@ -168,6 +176,53 @@ export class WebRTCPeer {
     }
   }
 
+  private async handleChunkedMessage(chunkMessage: any): Promise<void> {
+    const { chunkId, chunkIndex, totalChunks, chunk, originalType, originalId } = chunkMessage;
+
+    console.error(`[WebRTC DEBUG] Received chunk ${chunkIndex + 1}/${totalChunks} for ${originalType}`);
+
+    // Initialize chunk storage for this message
+    if (!this.pendingChunks.has(chunkId)) {
+      this.pendingChunks.set(chunkId, {
+        chunks: new Map(),
+        totalChunks,
+        originalType,
+        originalId
+      });
+    }
+
+    const pending = this.pendingChunks.get(chunkId)!;
+    pending.chunks.set(chunkIndex, chunk);
+
+    console.error(`[WebRTC DEBUG] Collected ${pending.chunks.size}/${totalChunks} chunks`);
+
+    // Check if we have all chunks
+    if (pending.chunks.size === totalChunks) {
+      console.error(`[WebRTC DEBUG] All chunks received, reassembling message`);
+
+      // Reassemble in order
+      let reassembled = '';
+      for (let i = 0; i < totalChunks; i++) {
+        reassembled += pending.chunks.get(i) || '';
+      }
+
+      console.error(`[WebRTC DEBUG] Reassembled ${reassembled.length} bytes`);
+
+      // Parse and handle the complete message
+      try {
+        const completeMessage = JSON.parse(reassembled);
+        console.error(`[WebRTC DEBUG] Parsed reassembled message successfully`);
+        await this.onMessageHandler(completeMessage);
+        console.error(`[WebRTC DEBUG] Reassembled message handler completed`);
+      } catch (error) {
+        console.error(`[WebRTC DEBUG] Failed to parse reassembled message:`, error);
+      }
+
+      // Clean up
+      this.pendingChunks.delete(chunkId);
+    }
+  }
+
   disconnect(): void {
     if (this.dataChannel) {
       this.dataChannel.close();
@@ -180,6 +235,7 @@ export class WebRTCPeer {
     }
 
     this.isConnected = false;
+    this.pendingChunks.clear();
     this.logger.info('WebRTC peer disconnected');
   }
 
