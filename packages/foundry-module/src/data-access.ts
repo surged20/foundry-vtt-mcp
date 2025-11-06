@@ -1118,27 +1118,20 @@ export class FoundryDataAccess {
       throw new Error(`${ERROR_MESSAGES.CHARACTER_NOT_FOUND}: ${identifier}`);
     }
 
-    // Process items with async iteration to prevent event loop blocking
+    // Build raw character data structure without sanitizing individual items
+    // (sanitize once at the end instead of per-item for performance)
     const items: CharacterItem[] = [];
-    let itemCount = 0;
     for (const item of actor.items) {
       items.push({
         id: item.id,
         name: item.name,
         type: item.type,
         ...(item.img ? { img: item.img } : {}),
-        system: this.sanitizeData(item.system),
+        system: item.system as Record<string, unknown>,
       });
-
-      // Yield to event loop every 10 items to allow other operations
-      if (++itemCount % 10 === 0) {
-        await new Promise(resolve => setImmediate(resolve));
-      }
     }
 
-    // Process effects with async iteration to prevent event loop blocking
     const effects: CharacterEffect[] = [];
-    let effectCount = 0;
     for (const effect of actor.effects) {
       effects.push({
         id: effect.id,
@@ -1153,25 +1146,22 @@ export class FoundryDataAccess {
           }
         } : {}),
       });
-
-      // Yield to event loop every 10 effects
-      if (++effectCount % 10 === 0) {
-        await new Promise(resolve => setImmediate(resolve));
-      }
     }
 
-    // Build character data structure
-    const characterData: CharacterInfo = {
+    // Build complete character data structure with raw data
+    const rawCharacterData = {
       id: actor.id || '',
       name: actor.name || '',
       type: actor.type,
       ...(actor.img ? { img: actor.img } : {}),
-      system: this.sanitizeData((actor as any).system),
+      system: (actor as any).system,
       items,
       effects,
     };
 
-    return characterData;
+    // Sanitize the complete structure once (instead of per-item)
+    // This is dramatically faster than calling sanitizeData 100+ times
+    return this.sanitizeData(rawCharacterData) as CharacterInfo;
   }
 
   /**
