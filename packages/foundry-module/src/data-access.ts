@@ -1100,6 +1100,8 @@ export class FoundryDataAccess {
    * Get character/actor information by name or ID
    */
   async getCharacterInfo(identifier: string): Promise<CharacterInfo> {
+    const startTime = performance.now();
+    console.log(`[MCP-DEBUG] getCharacterInfo START for: ${identifier}`);
 
     let actor: Actor | undefined;
 
@@ -1118,6 +1120,9 @@ export class FoundryDataAccess {
       throw new Error(`${ERROR_MESSAGES.CHARACTER_NOT_FOUND}: ${identifier}`);
     }
 
+    const findTime = performance.now();
+    console.log(`[MCP-DEBUG] Actor found in ${(findTime - startTime).toFixed(2)}ms`);
+
     // Build raw character data structure without sanitizing individual items
     // (sanitize once at the end instead of per-item for performance)
     const items: CharacterItem[] = [];
@@ -1130,6 +1135,9 @@ export class FoundryDataAccess {
         system: item.system as Record<string, unknown>,
       });
     }
+
+    const itemsTime = performance.now();
+    console.log(`[MCP-DEBUG] Built ${items.length} items in ${(itemsTime - findTime).toFixed(2)}ms`);
 
     const effects: CharacterEffect[] = [];
     for (const effect of actor.effects) {
@@ -1148,6 +1156,9 @@ export class FoundryDataAccess {
       });
     }
 
+    const effectsTime = performance.now();
+    console.log(`[MCP-DEBUG] Built ${effects.length} effects in ${(effectsTime - itemsTime).toFixed(2)}ms`);
+
     // Build complete character data structure with raw data
     const rawCharacterData = {
       id: actor.id || '',
@@ -1159,9 +1170,18 @@ export class FoundryDataAccess {
       effects,
     };
 
+    const structureTime = performance.now();
+    console.log(`[MCP-DEBUG] Built raw structure in ${(structureTime - effectsTime).toFixed(2)}ms`);
+
     // Sanitize the complete structure once (instead of per-item)
     // This is dramatically faster than calling sanitizeData 100+ times
-    return this.sanitizeData(rawCharacterData) as CharacterInfo;
+    const result = this.sanitizeData(rawCharacterData) as CharacterInfo;
+
+    const endTime = performance.now();
+    console.log(`[MCP-DEBUG] Sanitized in ${(endTime - structureTime).toFixed(2)}ms`);
+    console.log(`[MCP-DEBUG] getCharacterInfo TOTAL: ${(endTime - startTime).toFixed(2)}ms`);
+
+    return result;
   }
 
   /**

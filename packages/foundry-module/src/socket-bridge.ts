@@ -191,15 +191,22 @@ export class SocketBridge {
 
   private async handleMessage(message: any): Promise<void> {
     try {
+      console.log(`[MCP-DEBUG] handleMessage received: type=${message.type}, id=${message.id}`);
+
       if (message.type === 'mcp-query') {
+        const queryStart = performance.now();
         await this.handleMCPQuery(message.data, (response) => {
+          const queryEnd = performance.now();
+          console.log(`[MCP-DEBUG] Query completed in ${(queryEnd - queryStart).toFixed(2)}ms, sending response for id=${message.id}`);
           this.sendMessage({
             type: 'mcp-response',
             id: message.id,
             data: response
           });
+          console.log(`[MCP-DEBUG] Response sent for id=${message.id}`);
         });
       } else if (message.type === 'ping') {
+        console.log(`[MCP-DEBUG] Responding to ping id=${message.id}`);
         this.sendMessage({
           type: 'pong',
           id: message.id,
@@ -258,6 +265,7 @@ export class SocketBridge {
 
   private async handleMCPQuery(data: any, callback: (response: any) => void): Promise<void> {
     try {
+      console.log(`[MCP-DEBUG] handleMCPQuery START: method=${data.method}`);
       this.log(`Handling MCP query: ${data.method}`);
 
       // Check if the query handler exists in CONFIG.queries
@@ -265,20 +273,30 @@ export class SocketBridge {
       const handler = CONFIG.queries[queryKey];
 
       if (!handler || typeof handler !== 'function') {
+        console.error(`[MCP-DEBUG] No handler found for: ${data.method}`);
         throw new Error(`No handler found for query: ${data.method}`);
       }
 
+      console.log(`[MCP-DEBUG] Executing handler for: ${data.method}`);
+      const handlerStart = performance.now();
+
       // Execute the query handler
       const result = await handler(data.data || {});
-      
+
+      const handlerEnd = performance.now();
+      console.log(`[MCP-DEBUG] Handler executed in ${(handlerEnd - handlerStart).toFixed(2)}ms for: ${data.method}`);
+
       this.log(`Query completed: ${data.method}`);
+      console.log(`[MCP-DEBUG] Calling callback with success for: ${data.method}`);
       callback({ success: true, data: result });
+      console.log(`[MCP-DEBUG] Callback completed for: ${data.method}`);
 
     } catch (error) {
+      console.error(`[MCP-DEBUG] Query error for ${data.method}:`, error);
       this.log(`Query failed: ${data.method} - ${error instanceof Error ? error.message : 'Unknown error'}`);
-      callback({ 
-        success: false, 
-        error: error instanceof Error ? error.message : 'Unknown error' 
+      callback({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
       });
     }
   }
