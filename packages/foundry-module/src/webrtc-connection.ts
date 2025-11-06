@@ -40,8 +40,8 @@ export class WebRTCConnection {
 
       // Step 2: Create data channel
       this.dataChannel = this.peerConnection.createDataChannel('foundry-mcp', {
-        ordered: true,
-        maxRetransmits: 10
+        ordered: true
+        // Removed maxRetransmits to create reliable channel (won't close on large messages)
       });
 
       this.setupDataChannelHandlers();
@@ -74,12 +74,22 @@ export class WebRTCConnection {
       this.connectionState = CONNECTION_STATES.CONNECTED;
     };
 
-    this.dataChannel.onclose = () => {
+    this.dataChannel.onclose = (event) => {
+      console.error('[MCP-DEBUG] WebRTC data channel CLOSED', {
+        bufferedAmount: this.dataChannel?.bufferedAmount,
+        readyState: this.dataChannel?.readyState,
+        event: event
+      });
       this.log('WebRTC data channel closed');
       this.connectionState = CONNECTION_STATES.DISCONNECTED;
     };
 
     this.dataChannel.onerror = (error) => {
+      console.error('[MCP-DEBUG] WebRTC data channel ERROR', {
+        error: error,
+        bufferedAmount: this.dataChannel?.bufferedAmount,
+        readyState: this.dataChannel?.readyState
+      });
       this.log(`WebRTC data channel error: ${error}`);
     };
 
