@@ -211,21 +211,31 @@ export class FoundryConnector {
   }
 
   private async handleMessage(message: any): Promise<void> {
+    console.log(`[MCP-SERVER-DEBUG] handleMessage: type=${message.type}, id=${message.id}`);
+
     if (message.type === 'mcp-response' && message.id) {
+      console.log(`[MCP-SERVER-DEBUG] Response received for query id=${message.id}, checking pending queries`);
       const pending = this.pendingQueries.get(message.id);
+
       if (pending) {
+        console.log(`[MCP-SERVER-DEBUG] Found pending query for id=${message.id}, clearing timeout`);
         clearTimeout(pending.timeout);
         this.pendingQueries.delete(message.id);
+        console.log(`[MCP-SERVER-DEBUG] Remaining pending queries: ${this.pendingQueries.size}`);
 
         if (message.data.success) {
+          console.log(`[MCP-SERVER-DEBUG] Query SUCCESS for id=${message.id}, resolving promise`);
           this.logger.debug('Query response received', { id: message.id, hasData: !!message.data.data });
           pending.resolve(message.data.data);
         } else {
+          console.log(`[MCP-SERVER-DEBUG] Query FAILED for id=${message.id}: ${message.data.error}`);
           this.logger.error('Query failed', { id: message.id, error: message.data.error });
           pending.reject(new Error(message.data.error || 'Query failed'));
         }
       } else {
         // Log unmatched responses to help diagnose connection poisoning
+        console.error(`[MCP-SERVER-DEBUG] UNMATCHED RESPONSE for id=${message.id} (possibly timed out)`);
+        console.error(`[MCP-SERVER-DEBUG] Current pending queries: ${this.pendingQueries.size}`);
         this.logger.warn('Received response for unknown query (possibly timed out)', {
           id: message.id,
           success: message.data?.success,
@@ -405,14 +415,21 @@ export class FoundryConnector {
     }
 
     const queryId = `query-${++this.queryIdCounter}`;
+    console.log(`[MCP-SERVER-DEBUG] executeQuery: method=${method}, queryId=${queryId}`);
     this.logger.debug('Sending query to Foundry', { method, data, queryId, connectionType: this.activeConnectionType });
 
     return new Promise((resolve, reject) => {
+      const queryStart = Date.now();
+
       const timeout = setTimeout(() => {
+        const elapsed = Date.now() - queryStart;
+        console.error(`[MCP-SERVER-DEBUG] TIMEOUT for queryId=${queryId} after ${elapsed}ms (30s timeout)`);
+        console.error(`[MCP-SERVER-DEBUG] Pending queries at timeout: ${this.pendingQueries.size}`);
         this.pendingQueries.delete(queryId);
         reject(new Error(`Query timeout: ${method}`));
       }, 30000); // 30 second timeout (increased from 10s to handle complex queries)
 
+      console.log(`[MCP-SERVER-DEBUG] Registered pending query ${queryId}, total pending: ${this.pendingQueries.size + 1}`);
       this.pendingQueries.set(queryId, { resolve, reject, timeout });
 
       const message = {
@@ -422,6 +439,7 @@ export class FoundryConnector {
       };
 
       // Use sendToFoundry to support both WebSocket and WebRTC
+      console.log(`[MCP-SERVER-DEBUG] Sending message for queryId=${queryId} via ${this.activeConnectionType}`);
       this.sendToFoundry(message);
     });
   }
