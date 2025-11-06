@@ -195,15 +195,28 @@ export class WebRTCConnection {
   }
 
   sendMessage(message: any): void {
+    console.log(`[MCP-DEBUG] WebRTC sendMessage called: type=${message.type}, id=${message.id}`);
+    console.log(`[MCP-DEBUG] Data channel state: ${this.dataChannel?.readyState || 'null'}`);
+
     if (!this.dataChannel || this.dataChannel.readyState !== 'open') {
+      console.error(`[MCP-DEBUG] Cannot send - data channel not open! State: ${this.dataChannel?.readyState || 'null'}`);
       this.log('Cannot send message - data channel not open');
       return;
     }
 
     try {
-      this.dataChannel.send(JSON.stringify(message));
+      const json = JSON.stringify(message);
+      const size = json.length;
+      console.log(`[MCP-DEBUG] Sending ${size} bytes via WebRTC data channel`);
+      console.log(`[MCP-DEBUG] Data channel bufferedAmount before send: ${this.dataChannel.bufferedAmount}`);
+
+      this.dataChannel.send(json);
+
+      console.log(`[MCP-DEBUG] Data channel bufferedAmount after send: ${this.dataChannel.bufferedAmount}`);
+      console.log(`[MCP-DEBUG] WebRTC send succeeded for: ${message.type}`);
       this.log(`Sent WebRTC message: ${message.type}`);
     } catch (error) {
+      console.error(`[MCP-DEBUG] WebRTC send FAILED:`, error);
       this.log(`Failed to send WebRTC message: ${error}`);
     }
   }
