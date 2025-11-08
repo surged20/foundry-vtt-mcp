@@ -201,8 +201,45 @@ export class WebRTCConnection {
     }
 
     try {
-      this.dataChannel.send(JSON.stringify(message));
-      this.log(`Sent WebRTC message: ${message.type}`);
+      const json = JSON.stringify(message);
+      const size = json.length;
+
+      // SCTP maxMessageSize is 64KB (65536 bytes), use 50KB as safe threshold for chunking
+      // to account for JSON wrapper overhead (up to ~10KB due to string escaping in nested JSON)
+      const MAX_CHUNK_SIZE = 50 * 1024; // 50KB
+
+      if (size > MAX_CHUNK_SIZE) {
+        // Split into chunks
+        const totalChunks = Math.ceil(json.length / MAX_CHUNK_SIZE);
+        const chunkId = `chunk-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+        for (let i = 0; i < totalChunks; i++) {
+          const start = i * MAX_CHUNK_SIZE;
+          const end = Math.min(start + MAX_CHUNK_SIZE, json.length);
+          const chunk = json.substring(start, end);
+
+          const chunkMessage = {
+            type: 'chunked-message',
+            chunkId: chunkId,
+            chunkIndex: i,
+            totalChunks: totalChunks,
+            chunk: chunk,
+            originalType: message.type,
+            originalId: message.id
+          };
+
+          const chunkJson = JSON.stringify(chunkMessage);
+
+          // Verify chunk doesn't exceed SCTP maxMessageSize
+          if (chunkJson.length > 65536) {
+            throw new Error(`Chunk size ${chunkJson.length} exceeds SCTP maxMessageSize of 65536 bytes`);
+          }
+
+          this.dataChannel.send(chunkJson);
+        }
+      } else {
+        this.dataChannel.send(json);
+      }
     } catch (error) {
       this.log(`Failed to send WebRTC message: ${error}`);
     }
